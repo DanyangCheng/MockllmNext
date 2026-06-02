@@ -1,12 +1,45 @@
 responses:
   "what colour is the sky?": "The sky is blue during a clear day due to a phenomenon called Rayleigh scattering."
-  "who is the president?": "This is a mock response. In a production environment, this would be replaced with accurate, up-to-date information."
   "tell me a joke": "Why don't programmers like nature? It has too many bugs!"
-  "what is the meaning of life?": "According to this mock response, the meaning of life is to write better mock servers."
 
 defaults:
   unknown_response: "I don't know the answer to that. This is a mock response."
+# ==============================================================================
+# ADVANCED PATTERN MATCHING RULES (Regular Expressions Engine)
+# ==============================================================================
+# The 'patterns' block allows Mockllm to intercept incoming user prompts using 
+# regular expressions. It supports two execution routing modes:
+# 1. "tool_call" : Forcefully simulates an OpenAI function/tool calling response.
+# 2. "text"      : Short-circuits the request and returns a static text response.
+#
+# ⚠️ CRITICAL REQUIREMENT FOR TOOL CALLS (OpenAI API Compliance):
+#   To successfully invoke a tool and enable automatic schema matching/parameter 
+#   completion, the LLM client MUST register the corresponding tool definitions 
+#   inside the 'tools' field of the incoming API request. This strictly complies 
+#   with the OpenAI API standard. 
+#   If the client does not provide the 'tools' field, Mockllm will fall back to 
+#   using the static arguments defined below without dynamic schema inference.
+#
+# Global Feature - Capturing Groups:
+#   If your 'regex' contains capturing groups (e.g., "(.*)" or "(\d+)"), you can 
+#   use placeholders like $1, $2, etc., inside 'arguments', 'text', or 'final_text'.
+#   They will be automatically replaced with the matched substrings from the prompt.
+# ==============================================================================
+patterns:
+  - regex: "List the files in the current directory."
+    type: "tool_call"
+    function:
+      name: "list_dir"
+      arguments: '{"path": "./", "recursive": false}'
+    final_text: "Successfully invoked list_dir function, result: {{result}}"
+
+
+  - regex: "password|key|token"
+    type: "text"
+    text: "Alert: Sensitive content detected. Mockllm declined to respond due to privacy concerns."
+
+  
 
 settings:
   lag_enabled: true
-  lag_factor: 10  # Higher values = faster responses (10 = fast, 1 = slow)
+  lag_factor: 10
