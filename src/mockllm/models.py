@@ -1,16 +1,27 @@
 import time
 import uuid
-from typing import Dict, List, Literal, Optional
-
+from typing import Dict, List, Literal, Optional, Any, Union
 from pydantic import BaseModel, Field
 
-
+class FunctionCall(BaseModel):
+    name: str
+    arguments: str
+    
+    
+class ToolCall(BaseModel):
+    id: str
+    type: Literal["function"] = "function"
+    function: FunctionCall
+    
 # OpenAI Models
 class OpenAIMessage(BaseModel):
     """OpenAI chat message model."""
 
     role: str
-    content: str
+    content: Optional[str] = None
+    tool_calls: Optional[List[ToolCall]] = None
+    tool_call_id: Optional[str] = None
+    name: Optional[str] = None
 
 
 class OpenAIChatRequest(BaseModel):
@@ -21,13 +32,25 @@ class OpenAIChatRequest(BaseModel):
     temperature: Optional[float] = Field(default=0.7)
     max_tokens: Optional[int] = Field(default=150)
     stream: Optional[bool] = Field(default=False)
+    tools: Optional[List[Dict[str, Any]]] = None
+    tool_choice: Optional[Union[str, Dict[str, Any]]] = None
 
+class ChoiceDeltaFunctionCall(BaseModel):
+    name: Optional[str] = None
+    arguments: Optional[str] = None
+
+class ChoiceDeltaToolCall(BaseModel):
+    index: int
+    id: Optional[str] = None
+    type: Optional[Literal["function"]] = "function"
+    function: Optional[ChoiceDeltaFunctionCall] = None
 
 class OpenAIDeltaMessage(BaseModel):
     """OpenAI streaming delta message model."""
 
     role: Optional[str] = None
     content: Optional[str] = None
+    tool_calls: Optional[List[ChoiceDeltaToolCall]] = None
 
 
 class OpenAIStreamChoice(BaseModel):
@@ -35,7 +58,7 @@ class OpenAIStreamChoice(BaseModel):
 
     delta: OpenAIDeltaMessage
     index: int = 0
-    finish_reason: Optional[str] = None
+    finish_reason: Optional[Literal["stop", "length", "tool_calls", "content_filter"]] = None
 
 
 class OpenAIChatChoice(BaseModel):
@@ -43,7 +66,7 @@ class OpenAIChatChoice(BaseModel):
 
     message: OpenAIMessage
     index: int = 0
-    finish_reason: str = "stop"
+    finish_reason: Literal["stop", "length", "tool_calls", "content_filter"] = "stop"
 
 
 class OpenAIChatResponse(BaseModel):
@@ -53,7 +76,7 @@ class OpenAIChatResponse(BaseModel):
     object: str = "chat.completion"
     created: int = Field(default_factory=lambda: int(time.time()))
     model: str
-    choices: List[Dict]
+    choices: List[OpenAIChatChoice]
     usage: Dict[str, int]
 
 
