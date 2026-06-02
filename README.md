@@ -1,40 +1,56 @@
-# Mock LLM Server
+# Mock LLM Next
 
-[![CI](https://github.com/stacklok/mockllm/actions/workflows/ci.yml/badge.svg)](https://github.com/stacklok/mockllm/actions/workflows/ci.yml)
-[![PyPI version](https://badge.fury.io/py/mockllm.svg)](https://badge.fury.io/py/mockllm)
+[![CI](https://github.com/danyangcheng/mockllm/actions/workflows/ci.yml/badge.svg)](https://github.com/danyangcheng/mockllm/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 ![mockllm-logo](assets/logo.png)
 
-An LLM simulator that mimics OpenAI and Anthropic API formats. Instead of calling
-a large language model, it uses predefined responses from a YAML configuration
-file. 
+**Mock LLM Next** is an enhanced LLM simulator fork of the original [stacklok/mockllm](https://github.com/stacklok/mockllm) project. It perfectly mimics OpenAI and Anthropic API formats using predefined responses and regular expression routing from a YAML configuration file instead of calling an actual upstream large language model.
 
-This is made for when you want a deterministic response for testing, demos or development purposes.
+This next-generation fork is specifically tailored for deterministic testing, interactive demos, and local development/debugging of complex LLM Agents and Multi-Agent workflows (e.g., LangGraph, LangChain) by providing advanced tool-calling simulation and stateful session tracking.
 
 ## Features
 
-- OpenAI and Anthropic compatible API endpoints
-- Streaming support (character-by-character response streaming)
-- Configurable responses via YAML file
-- Hot-reloading of response configurations
-- Mock token counting
+- **OpenAI and Anthropic compatible API endpoints**
+- **Streaming support** (character-by-character response streaming)
+- **OpenAI Tool Calling (Function Calling)** support for both standard and text/event-stream chunks.
+- **Advanced Regular Expression Patterns Engine** for dynamic tool/text interception and user intent capturing.
+- **Stateful Multi-Turn Agent Loop Tracking** to store, simulate, and gracefully terminate local tool executions without endless loops.
+- **Configurable responses via YAML file** with hot-reloading support.
+- **Mock token counting**.
 
 ## Configuration
 
 ### Response Configuration
 
-Responses are configured in `responses.yml`. The file has three main sections:
+Responses are configured in `responses.yml`. The file has four main sections:
 
-1. `responses`: Maps input prompts to predefined responses
-2. `defaults`: Contains default configurations like the unknown response message
-3. `settings`: Contains server behavior settings like network lag simulation
+1. `responses`: Maps precise input prompts to predefined responses.
+2. `patterns`: Advanced regular expression matching rules for routing to text guardrails or complex tool calling interactions.
+3. `defaults`: Contains default configurations like the unknown response message.
+4. `settings`: Contains server behavior settings like network lag simulation.
 
 Example `responses.yml`:
+
 ```yaml
+
 responses:
   "write a python function to calculate factorial": "def factorial(n):\n    if n == 0:\n        return 1\n    return n * factorial(n - 1)"
   "what colour is the sky?": "The sky is purple except on Tuesday when it is  hue green."
-  "what is 2+2?": "2+2 equals 9."
+
+# Advanced Pattern Matching & Tool Calling Engine
+patterns:
+  # Route 1: Force a Tool Call & capture dynamic arguments
+  - regex: "^List the files in (.*)$"
+    type: "tool_call"
+    function:
+      name: "list_dir"
+      arguments: '{"path": "$1", "recursive": false}'
+    final_text: "Successfully invoked list_dir on directory $1, execution result: {{tool_result}}"
+
+  # Route 2: Short-circuit user request with a static text guardrail
+  - regex: "password|key|token"
+    type: "text"
+    text: "Alert: Sensitive content detected. Mockllm declined to respond due to privacy concerns."
 
 defaults:
   unknown_response: "I don't know the answer to that. This is a mock response."
@@ -44,57 +60,65 @@ settings:
   lag_factor: 10  # Higher values = faster responses (10 = fast, 1 = slow)
 ```
 
-### Network Lag Simulation
+Tool Calling & Regex Patterns Deep Dive
 
-The server can simulate network latency for more realistic testing scenarios. This is controlled by two settings:
+1. Client Requirement (OpenAI API Compliance)
 
-- `lag_enabled`: When true, enables artificial network lag
-- `lag_factor`: Controls the speed of responses
-  - Higher values (e.g., 10) result in faster responses
-  - Lower values (e.g., 1) result in slower responses
-  - Affects both streaming and non-streaming responses
+- To enjoy automatic schema matching and dynamic parameter backfilling, the LLM client (e.g., LangChain or LangGraph) MUST register the tool descriptions inside the tools field of the incoming request payload. Mockllm will automatically search the tools array by the function name, inspect the required properties' data types, and patch any missing parameters.
 
-For streaming responses, the lag is applied per-character with slight random variations to simulate realistic network conditions.
+2. Multi-Turn Agent Loop Lifecycle (final_text)
 
-### Hot Reloading
+- When type is set to "tool_call", Mockllm coordinates with your local Agent workflow in a sandbox environment:  
 
-The server automatically detects changes to `responses.yml` and reloads the configuration without restarting the server.
+- Turn 1 (Invocation): The user prompt matches a regex pattern. Mockllm replies to the Agent framework with a structured tool call payload and finish_reason="tool_calls". Behind the scenes, the context is safely cached using a unique tool call ID.  
+
+- Local Execution: Your Agent catches the intent and executes the corresponding codebase function locally.
+
+- Turn 2 (Completion & Destruct): The Agent appends a message with role="tool" containing the outcome and submits it back to Mockllm. Mockllm captures this, pops/destroys the cached session to avoid memory leaks, breaks out of the execution loop, and renders the final_text.
+
+3. Dynamic Placeholders
+- $1, $2, ...: Replaced dynamically by regex capture groups parsed from the original user query.
+
+- {{tool_result}}: Replaced dynamically by the real output payload submitted back from your Agent's local tool node.
+
+## Hot Reloading
+The server automatically detects changes to responses.yml and reloads the configuration without restarting the server.
 
 ## Installation
+From PyPI
 
-### From PyPI
-
-```bash
+```
+Bash
 pip install mockllm
 ```
 
-### From Source
+From Source
+Clone the repository:
 
-1. Clone the repository:
-```bash
-git clone https://github.com/stacklok/mockllm.git
+```Bash
+git clone [https://github.com/stacklok/mockllm.git](https://github.com/stacklok/mockllm.git)
 cd mockllm
 ```
 
-2. Install Poetry (if not already installed):
-```bash
-curl -sSL https://install.python-poetry.org | python3 -
+Install Poetry (if not already installed):
+
+```Bash
+curl -sSL [https://install.python-poetry.org](https://install.python-poetry.org) | python3 -
+Install dependencies:
 ```
 
-3. Install dependencies:
-```bash
+```Bash
 poetry install  # Install with all dependencies
 # or
-poetry install --without dev  # Install without development dependencies
+poetry install --without dev  # Install without 
+development dependencies
 ```
 
 ## Usage
-
-### CLI Commands
-
+CLI Commands
 MockLLM provides a command-line interface for managing the server and validating configurations:
 
-```bash
+```Bash
 # Show available commands and options
 mockllm --help
 
@@ -112,33 +136,31 @@ mockllm start --host localhost --port 3000
 
 # Validate a responses file
 mockllm validate responses.yml
+Quick Start
+Set up the responses.yml:
 ```
 
-### Quick Start
 
-1. Set up the responses.yml:
-```bash
-cp example.responses.yml responses.yml
+Validate your responses file (optional):
+
+```Bash
+mockllm validate custom_responses.yml
 ```
 
-2. Validate your responses file (optional):
-```bash
-mockllm validate responses.yml
-```
+Start the server:
 
-3. Start the server:
-```bash
+```Bash
 mockllm start --responses responses.yml
+The server will start on http://localhost:8000 by default.
 ```
 
-The server will start on `http://localhost:8000` by default.
+## API Endpoints
 
-### API Endpoints
+### OpenAI Format
 
-#### OpenAI Format
+Regular Request:
 
-Regular request:
-```bash
+```Bash
 curl -X POST http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
@@ -149,8 +171,9 @@ curl -X POST http://localhost:8000/v1/chat/completions \
   }'
 ```
 
-Streaming request:
-```bash
+Streaming Request:
+
+```Bash
 curl -X POST http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
@@ -162,10 +185,40 @@ curl -X POST http://localhost:8000/v1/chat/completions \
   }'
 ```
 
-#### Anthropic Format
+OpenAI Tool Calling Interception Request:
 
-Regular request:
-```bash
+
+```Bash
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "mock-llm",
+    "messages": [
+      {"role": "user", "content": "List the files in the current directory."}
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "list_dir",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "path": {"type": "string"},
+              "recursive": {"type": "boolean"}
+            }
+          }
+        }
+      }
+    ]
+  }'
+```
+
+### Anthropic Format
+
+Regular Request:
+
+```Bash
 curl -X POST http://localhost:8000/v1/messages \
   -H "Content-Type: application/json" \
   -d '{
@@ -176,8 +229,9 @@ curl -X POST http://localhost:8000/v1/messages \
   }'
 ```
 
-Streaming request:
-```bash
+Streaming Request:
+
+```Bash
 curl -X POST http://localhost:8000/v1/messages \
   -H "Content-Type: application/json" \
   -d '{
@@ -192,16 +246,15 @@ curl -X POST http://localhost:8000/v1/messages \
 ## Testing
 
 To run the tests:
-```bash
+
+```Bash
 poetry run pytest
 ```
 
 ## Contributing
-
 Contributions are welcome! Please open an issue or submit a PR.
 
-Check out the [CodeGate](https://github.com/stacklok/codegate) project when you're done here!
+Check out the CodeGate project when you're done here!
 
 ## License
-
-This project is licensed under the [Apache 2.0 License](LICENSE).
+This project is licensed under the Apache 2.0 License.
