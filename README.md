@@ -1,6 +1,5 @@
 # Mock LLM Next
 
-[![CI](https://github.com/danyangcheng/mockllm/actions/workflows/ci.yml/badge.svg)](https://github.com/danyangcheng/mockllm/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 ![mockllm-logo](assets/logo.png)
 
@@ -63,58 +62,39 @@ settings:
 Tool Calling & Regex Patterns Deep Dive
 
 1. Client Requirement (OpenAI API Compliance)
-
-- To enjoy automatic schema matching and dynamic parameter backfilling, the LLM client (e.g., LangChain or LangGraph) MUST register the tool descriptions inside the tools field of the incoming request payload. Mockllm will automatically search the tools array by the function name, inspect the required properties' data types, and patch any missing parameters.
+    - To enjoy automatic schema matching and dynamic parameter backfilling, the LLM client (e.g., LangChain or LangGraph) MUST register the tool descriptions inside the tools field of the incoming request payload. Mockllm will automatically search the tools array by the function name, inspect the required properties' data types, and patch any missing parameters.
 
 2. Multi-Turn Agent Loop Lifecycle (final_text)
+    - When type is set to "tool_call", Mockllm coordinates with your local Agent workflow in a sandbox environment:  
 
-- When type is set to "tool_call", Mockllm coordinates with your local Agent workflow in a sandbox environment:  
+    - Turn 1 (Invocation): The user prompt matches a regex pattern. Mockllm replies to the Agent framework with a structured tool call payload and finish_reason="tool_calls". Behind the scenes, the context is safely cached using a unique tool call ID.  
 
-- Turn 1 (Invocation): The user prompt matches a regex pattern. Mockllm replies to the Agent framework with a structured tool call payload and finish_reason="tool_calls". Behind the scenes, the context is safely cached using a unique tool call ID.  
+    - Local Execution: Your Agent catches the intent and executes the corresponding codebase function locally.
 
-- Local Execution: Your Agent catches the intent and executes the corresponding codebase function locally.
-
-- Turn 2 (Completion & Destruct): The Agent appends a message with role="tool" containing the outcome and submits it back to Mockllm. Mockllm captures this, pops/destroys the cached session to avoid memory leaks, breaks out of the execution loop, and renders the final_text.
+    - Turn 2 (Completion & Destruct): The Agent appends a message with role="tool" containing the outcome and submits it back to Mockllm. Mockllm captures this, pops/destroys the cached session to avoid memory leaks, breaks out of the execution loop, and renders the final_text.
 
 3. Dynamic Placeholders
-- $1, $2, ...: Replaced dynamically by regex capture groups parsed from the original user query.
+    - $1, $2, ...: Replaced dynamically by regex capture groups parsed from the original user query.
 
-- {{tool_result}}: Replaced dynamically by the real output payload submitted back from your Agent's local tool node.
+    - {{tool_result}}: Replaced dynamically by the real output payload submitted back from your Agent's local tool node.
 
 ## Hot Reloading
+
 The server automatically detects changes to responses.yml and reloads the configuration without restarting the server.
 
 ## Installation
-From PyPI
-
-```
-Bash
-pip install mockllm
-```
 
 From Source
 Clone the repository:
 
 ```Bash
-git clone [https://github.com/stacklok/mockllm.git](https://github.com/stacklok/mockllm.git)
+git clone [https://github.com/DanyangCheng/mockllm.git](https://github.com/DanyangCheng/mockllm.git)
 cd mockllm
-```
-
-Install Poetry (if not already installed):
-
-```Bash
-curl -sSL [https://install.python-poetry.org](https://install.python-poetry.org) | python3 -
-Install dependencies:
-```
-
-```Bash
-poetry install  # Install with all dependencies
-# or
-poetry install --without dev  # Install without 
-development dependencies
+pip install -e .
 ```
 
 ## Usage
+
 CLI Commands
 MockLLM provides a command-line interface for managing the server and validating configurations:
 
@@ -136,10 +116,13 @@ mockllm start --host localhost --port 3000
 
 # Validate a responses file
 mockllm validate responses.yml
-Quick Start
-Set up the responses.yml:
 ```
 
+## Quick Start
+
+Set up the responses.yml:
+
+```yaml
 
 Validate your responses file (optional):
 
@@ -186,7 +169,6 @@ curl -X POST http://localhost:8000/v1/chat/completions \
 ```
 
 OpenAI Tool Calling Interception Request:
-
 
 ```Bash
 curl -X POST http://localhost:8000/v1/chat/completions \
@@ -252,9 +234,11 @@ poetry run pytest
 ```
 
 ## Contributing
+
 Contributions are welcome! Please open an issue or submit a PR.
 
 Check out the CodeGate project when you're done here!
 
 ## License
+
 This project is licensed under the Apache 2.0 License.
