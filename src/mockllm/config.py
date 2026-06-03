@@ -9,8 +9,12 @@ from pathlib import Path
 from typing import AsyncGenerator, Dict, Generator, Optional, cast, Any
 
 import yaml
-from fastapi import HTTPException
 from pythonjsonlogger.json import JsonFormatter
+
+
+class ConfigError(Exception):
+    """Raised when response configuration cannot be loaded."""
+
 
 log_handler = logging.StreamHandler()
 log_handler.setFormatter(JsonFormatter())
@@ -55,8 +59,8 @@ class ResponseConfig:
                 )
         except Exception as e:
             logger.error(f"Error loading responses: {str(e)}")
-            raise HTTPException(
-                status_code=500, detail="Failed to load response configuration"
+            raise ConfigError(
+                "Failed to load response configuration"
             ) from e
 
     def match_pattern(self, prompt: str) -> Optional[Dict[str, Any]]:

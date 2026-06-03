@@ -1,5 +1,5 @@
 import logging
-from typing import Any, AsyncGenerator, Dict, Union
+from typing import Any, Dict, Union
 
 import tiktoken
 from fastapi import FastAPI, HTTPException
@@ -9,12 +9,7 @@ from pythonjsonlogger.json import JsonFormatter
 from .config import ResponseConfig
 from .models import (
     AnthropicChatRequest,
-    AnthropicStreamDelta,
-    AnthropicStreamResponse,
     OpenAIChatRequest,
-    OpenAIDeltaMessage,
-    OpenAIStreamChoice,
-    OpenAIStreamResponse,
 )
 from .providers.anthropic import AnthropicProvider
 from .providers.openai import OpenAIProvider
@@ -39,44 +34,6 @@ def count_tokens(text: str, model: str) -> int:
     except Exception:
         # Fallback to rough estimation if model not supported
         return len(text.split())
-
-
-async def openai_stream_response(content: str, model: str) -> AsyncGenerator[str, None]:
-    """Generate OpenAI-style streaming response in SSE format."""
-    first_chunk = OpenAIStreamResponse(
-        model=model,
-        choices=[OpenAIStreamChoice(delta=OpenAIDeltaMessage(role="assistant"))],
-    )
-    yield f"data: {first_chunk.model_dump_json()}\n\n"
-
-    # Stream the content character by character with lag
-    async for chunk in response_config.get_streaming_response_with_lag(content):
-        chunk_response = OpenAIStreamResponse(
-            model=model,
-            choices=[OpenAIStreamChoice(delta=OpenAIDeltaMessage(content=chunk))],
-        )
-        yield f"data: {chunk_response.model_dump_json()}\n\n"
-
-    # Send the final message
-    final_chunk = OpenAIStreamResponse(
-        model=model,
-        choices=[OpenAIStreamChoice(delta=OpenAIDeltaMessage(), finish_reason="stop")],
-    )
-    yield f"data: {final_chunk.model_dump_json()}\n\n"
-    yield "data: [DONE]\n\n"
-
-
-async def anthropic_stream_response(
-    content: str, model: str
-) -> AsyncGenerator[str, None]:
-    """Generate Anthropic-style streaming response in SSE format."""
-    async for chunk in response_config.get_streaming_response_with_lag(content):
-        stream_response = AnthropicStreamResponse(
-            delta=AnthropicStreamDelta(delta={"text": chunk})
-        )
-        yield f"data: {stream_response.model_dump_json()}\n\n"
-
-    yield "data: [DONE]\n\n"
 
 
 @app.post("/v1/chat/completions", response_model=None)

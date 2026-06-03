@@ -44,7 +44,7 @@ patterns:
     function:
       name: "list_dir"
       arguments: '{"path": "$1", "recursive": false}'
-    final_text: "Successfully invoked list_dir on directory $1, execution result: {{tool_result}}"
+    final_text: "Successfully invoked list_dir on directory $1, execution result: {{result}}"
 
   # Route 2: Short-circuit user request with a static text guardrail
   - regex: "password|key|token"
@@ -76,7 +76,7 @@ Tool Calling & Regex Patterns Deep Dive
 3. Dynamic Placeholders
     - $1, $2, ...: Replaced dynamically by regex capture groups parsed from the original user query.
 
-    - {{tool_result}}: Replaced dynamically by the real output payload submitted back from your Agent's local tool node.
+    - {{result}}: Replaced dynamically by the real output payload submitted back from your Agent's local tool node.
 
 ## Hot Reloading
 
