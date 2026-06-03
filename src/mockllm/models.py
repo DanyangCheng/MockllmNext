@@ -92,10 +92,14 @@ class OpenAIStreamResponse(BaseModel):
 
 # Anthropic Models
 class AnthropicMessage(BaseModel):
-    """Anthropic message model."""
+    """Anthropic message model.
+
+    Content can be a plain string (simple text) or a list of content
+    blocks (text, tool_use, tool_result).
+    """
 
     role: Literal["user", "assistant"]
-    content: str
+    content: Union[str, List[Dict[str, Any]]]
 
 
 class AnthropicChatRequest(BaseModel):
@@ -106,6 +110,7 @@ class AnthropicChatRequest(BaseModel):
     messages: List[AnthropicMessage]
     stream: Optional[bool] = Field(default=False)
     temperature: Optional[float] = Field(default=1.0)
+    tools: Optional[List[Dict[str, Any]]] = None
 
 
 class AnthropicChatResponse(BaseModel):
@@ -115,7 +120,7 @@ class AnthropicChatResponse(BaseModel):
     type: str = "message"
     role: str = "assistant"
     model: str
-    content: List[Dict[str, str]]
+    content: List[Dict[str, Any]]
     stop_reason: Optional[str] = "end_turn"
     stop_sequence: Optional[str] = None
     usage: Dict[str, int]

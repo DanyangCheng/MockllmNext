@@ -1,7 +1,5 @@
 import json
-import uuid
 import logging
-from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Dict, List, Optional, Union
 
 from fastapi import HTTPException
@@ -11,7 +9,6 @@ from ..config import ResponseConfig
 from ..models import (
     ChoiceDeltaFunctionCall,
     ChoiceDeltaToolCall,
-    FunctionCall,
     OpenAIChatChoice,
     OpenAIChatRequest,
     OpenAIChatResponse,
@@ -22,80 +19,10 @@ from ..models import (
     ToolCall,
 )
 from ..utils import count_tokens
+from ._shared import ActiveToolCall, ToolCallRegistry, resolve_final_text
 from .base import LLMProvider
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Data classes
-# ---------------------------------------------------------------------------
-
-@dataclass
-class ActiveToolCall:
-    """Transient state stored between a tool-call response and its result."""
-    arguments: Dict[str, Any]
-    matched_pattern: Optional[Dict[str, Any]] = None
-
-
-# ---------------------------------------------------------------------------
-# Helper: build mock tool-call arguments
-# ---------------------------------------------------------------------------
-
-class MockArgumentBuilder:
-    """Builds mock arguments for a single function schema."""
-
-    _DEFAULTS: Dict[str, Any] = {
-        "string": lambda name: f"mock_{name}_value",
-        "number": lambda _: 42,
-        "integer": lambda _: 42,
-        "boolean": lambda _: True,
-        "array": lambda _: ["mock_item"],
-    }
-
-    @classmethod
-    def build(
-        cls,
-        properties: Dict[str, Any],
-        overrides: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
-        """
-        Return a dict of mock values for every property in *properties*.
-        Values present in *overrides* take priority; missing ones are
-        synthesised from the property type.
-        """
-        result = dict(overrides or {})
-        for prop_name, prop_schema in properties.items():
-            if prop_name in result:
-                continue
-            prop_type = prop_schema.get("type", "string")
-            factory = cls._DEFAULTS.get(prop_type, lambda _: {})
-            result[prop_name] = factory(prop_name)
-        return result
-
-
-# ---------------------------------------------------------------------------
-# Helper: tool-call registry (replaces the raw dict on the provider)
-# ---------------------------------------------------------------------------
-
-class ToolCallRegistry:
-    """Thread-unsafe but sufficient for single-process mock servers."""
-
-    def __init__(self) -> None:
-        self._store: Dict[str, ActiveToolCall] = {}
-
-    def register(self, tool_id: str, call: ActiveToolCall) -> None:
-        self._store[tool_id] = call
-
-    def pop(self, tool_id: str) -> Optional[ActiveToolCall]:
-        entry = self._store.pop(tool_id, None)
-        if entry is not None:
-            logger.info("Tool call %s consumed from registry.", tool_id)
-        return entry
-
-    @staticmethod
-    def new_id() -> str:
-        return f"call_{uuid.uuid4().hex[:24]}"
 
 
 # ---------------------------------------------------------------------------
@@ -137,18 +64,18 @@ class StreamChunkFactory:
         )
 
     @classmethod
-    def tool_header(cls, model: str, tool: ToolCall) -> str:
+    def tool_header(cls, model: str, tool: ToolCall, index: int = 0) -> str:
         return cls._sse(
             OpenAIStreamResponse(
                 model=model,
                 choices=[
                     OpenAIStreamChoice(
-                        index=0,
+                        index=index,
                         delta=OpenAIDeltaMessage(
-                            role="assistant",
+                            role="assistant" if index == 0 else None,
                             tool_calls=[
                                 ChoiceDeltaToolCall(
-                                    index=0,
+                                    index=index,
                                     id=tool.id,
                                     type="function",
                                     function=ChoiceDeltaFunctionCall(
@@ -164,17 +91,17 @@ class StreamChunkFactory:
         )
 
     @classmethod
-    def tool_args_chunk(cls, model: str, args_fragment: str) -> str:
+    def tool_args_chunk(cls, model: str, args_fragment: str, index: int = 0) -> str:
         return cls._sse(
             OpenAIStreamResponse(
                 model=model,
                 choices=[
                     OpenAIStreamChoice(
-                        index=0,
+                        index=index,
                         delta=OpenAIDeltaMessage(
                             tool_calls=[
                                 ChoiceDeltaToolCall(
-                                    index=0,
+                                    index=index,
                                     function=ChoiceDeltaFunctionCall(arguments=args_fragment),
                                 )
                             ]
@@ -215,33 +142,13 @@ class OpenAIProvider(LLMProvider):
     # Tool-call generation
     # ------------------------------------------------------------------
 
-    def _build_tool_call(
-        self,
-        func_name: str,
-        properties: Dict[str, Any],
-        overrides: Optional[Dict[str, Any]],
-        matched_pattern: Optional[Dict[str, Any]],
-    ) -> ToolCall:
-        """Create one ToolCall and register it for later result lookup."""
-        arguments = MockArgumentBuilder.build(properties, overrides)
-        tool_id = ToolCallRegistry.new_id()
-        self._registry.register(tool_id, ActiveToolCall(arguments, matched_pattern))
-        return ToolCall(
-            id=tool_id,
-            type="function",
-            function=FunctionCall(
-                name=func_name,
-                arguments=json.dumps(arguments, ensure_ascii=False),
-            ),
-        )
-
-    def _tool_call_from_regex(
+    async def _tool_call_from_regex(
         self,
         tools: List[Dict[str, Any]],
         regex_tool_info: Dict[str, Any],
         matched_pattern: Optional[Dict[str, Any]],
-    ) -> ToolCall:
-        """Build a ToolCall when a regex pattern specified the function name/args."""
+    ) -> List[ToolCall]:
+        """Build ToolCalls when a regex pattern specified the function name/args."""
         func_name = regex_tool_info.get("name", "mock_function")
         raw_args = regex_tool_info.get("arguments", "{}")
 
@@ -251,7 +158,6 @@ class OpenAIProvider(LLMProvider):
         if not isinstance(overrides, dict):
             overrides = {}
 
-        # Attempt to find the matching schema so we can fill missing properties.
         matched_tool = next(
             (
                 t for t in tools
@@ -265,38 +171,43 @@ class OpenAIProvider(LLMProvider):
             if matched_tool
             else {}
         )
-        return self._build_tool_call(func_name, properties, overrides, matched_pattern)
+        tc = await self._registry._build_tool_call(
+            func_name, properties, overrides, matched_pattern
+        )
+        return [tc]
 
-    def _tool_call_from_schema(
+    async def _tool_calls_from_schema(
         self,
         tools: List[Dict[str, Any]],
         matched_pattern: Optional[Dict[str, Any]],
-    ) -> Optional[ToolCall]:
-        """Build a ToolCall from the first tool in the schema list."""
-        if not tools:
-            return None
-        tool = tools[0]
-        if tool.get("type") != "function":
-            return None
-        func_info = tool.get("function", {})
-        properties = func_info.get("parameters", {}).get("properties", {})
-        return self._build_tool_call(
-            func_info.get("name", "mock_function"),
-            properties,
-            overrides=None,
-            matched_pattern=matched_pattern,
-        )
+    ) -> List[ToolCall]:
+        """Build ToolCalls for all function tools in the schema list."""
+        tool_calls: List[ToolCall] = []
+        for tool in tools:
+            if tool.get("type") != "function":
+                continue
+            func_info = tool.get("function", {})
+            properties = func_info.get("parameters", {}).get("properties", {})
+            tc = await self._registry._build_tool_call(
+                func_info.get("name", "mock_function"),
+                properties,
+                overrides=None,
+                matched_pattern=matched_pattern,
+            )
+            tool_calls.append(tc)
+        return tool_calls
 
-    def _generate_mock_tool_calls(
+    async def _generate_mock_tool_calls(
         self,
         tools: List[Dict[str, Any]],
         regex_tool_info: Optional[Dict[str, Any]] = None,
         matched_pattern: Optional[Dict[str, Any]] = None,
     ) -> List[ToolCall]:
         if regex_tool_info:
-            return [self._tool_call_from_regex(tools, regex_tool_info, matched_pattern)]
-        tool = self._tool_call_from_schema(tools, matched_pattern)
-        return [tool] if tool else []
+            return await self._tool_call_from_regex(
+                tools, regex_tool_info, matched_pattern
+            )
+        return await self._tool_calls_from_schema(tools, matched_pattern)
 
     # ------------------------------------------------------------------
     # Streaming
@@ -310,16 +221,16 @@ class OpenAIProvider(LLMProvider):
         raw_text: Optional[str] = None,
     ) -> AsyncGenerator[str, None]:
         if tool_calls:
-            yield StreamChunkFactory.tool_header(model, tool_calls[0])
-            async for fragment in self.response_config.stream_raw_text_with_lag(
-                tool_calls[0].function.arguments
-            ):
-                yield StreamChunkFactory.tool_args_chunk(model, fragment)
+            for i, tc in enumerate(tool_calls):
+                yield StreamChunkFactory.tool_header(model, tc, index=i)
+                async for fragment in self.response_config.stream_raw_text_with_lag(
+                    tc.function.arguments
+                ):
+                    yield StreamChunkFactory.tool_args_chunk(model, fragment, index=i)
             yield StreamChunkFactory.tool_stop_chunk(model)
             yield StreamChunkFactory.DONE
             return
 
-        # Plain-text streaming (raw_text bypasses the response_config templating)
         text_to_stream = raw_text if raw_text is not None else content or ""
         stream_fn = (
             self.response_config.stream_raw_text_with_lag
@@ -336,29 +247,6 @@ class OpenAIProvider(LLMProvider):
     # ------------------------------------------------------------------
     # Request routing
     # ------------------------------------------------------------------
-
-    def _resolve_final_text(
-        self,
-        cached_call: Optional[ActiveToolCall],
-        matched_pattern: Optional[Dict[str, Any]],
-        tool_result_content: str,
-    ) -> Optional[str]:
-        """
-        Determine the scripted reply text (if any) that should follow a
-        tool-result message, substituting {{result}} with the actual content.
-        """
-        active_pattern = (
-            cached_call.matched_pattern
-            if (cached_call and cached_call.matched_pattern)
-            else (matched_pattern if matched_pattern and matched_pattern.get("type") == "tool_call" else None)
-        )
-        if active_pattern is None:
-            return None
-
-        final_text: Optional[str] = active_pattern.get("final_text")
-        if final_text and tool_result_content:
-            final_text = final_text.replace("{{result}}", tool_result_content)
-        return final_text
 
     async def handle_chat_completion(
         self, request: OpenAIChatRequest
@@ -379,7 +267,7 @@ class OpenAIProvider(LLMProvider):
         )
         last_msg = request.messages[-1]
 
-        # ---- branch: emit a tool call ----
+        # ---- branch: emit tool calls ----
         is_tool_response = last_msg.role == "tool"
         trigger_tool = (
             not is_tool_response
@@ -395,7 +283,7 @@ class OpenAIProvider(LLMProvider):
                 if matched_pattern and matched_pattern.get("type") == "tool_call"
                 else None
             )
-            tool_calls = self._generate_mock_tool_calls(
+            tool_calls = await self._generate_mock_tool_calls(
                 request.tools or [], regex_tool_info, matched_pattern
             )
             if request.stream:
@@ -430,9 +318,9 @@ class OpenAIProvider(LLMProvider):
             tool_call_id = last_msg.tool_call_id
             tool_result_content = last_msg.content or ""
             if tool_call_id:
-                cached_call = self._registry.pop(tool_call_id)
+                cached_call = await self._registry.pop(tool_call_id)
 
-        final_text = self._resolve_final_text(cached_call, matched_pattern, tool_result_content)
+        final_text = resolve_final_text(cached_call, matched_pattern, tool_result_content)
 
         # ---- stream or return plain text ----
         if request.stream:
