@@ -198,3 +198,139 @@ def test_openai_agent_loop_break(sample_tools):
     assert data["choices"][0]["finish_reason"] == "stop"
     assert "content" in data["choices"][0]["message"]
     assert data["choices"][0]["message"]["content"] == "I don't know the answer to that."
+
+
+def test_openai_multi_tool_schema():
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "get_weather",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"city": {"type": "string"}},
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_time",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"timezone": {"type": "string"}},
+                },
+            },
+        },
+    ]
+    response = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "mock-llm",
+            "messages": [{"role": "user", "content": "weather and time please"}],
+            "tools": tools,
+            "tool_choice": "auto",
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["choices"][0]["finish_reason"] == "tool_calls"
+    tool_calls = data["choices"][0]["message"]["tool_calls"]
+    assert len(tool_calls) == 2
+    assert tool_calls[0]["function"]["name"] == "get_weather"
+    assert tool_calls[1]["function"]["name"] == "get_time"
+
+
+def test_openai_multi_tool_streaming():
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "search_web",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "fetch_page",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"url": {"type": "string"}},
+                },
+            },
+        },
+    ]
+    response = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "mock-llm",
+            "messages": [{"role": "user", "content": "search and fetch"}],
+            "tools": tools,
+            "stream": True,
+        },
+    )
+    assert response.status_code == 200
+    lines = [line for line in response.iter_lines()]
+    data_lines = [l for l in lines if l.startswith("data: ") and "[DONE]" not in l]
+    chunks = [json.loads(l.replace("data: ", "")) for l in data_lines]
+
+    tool_names = set()
+    for c in chunks:
+        for choice in c.get("choices", []):
+            delta = choice.get("delta", {})
+            for tc in delta.get("tool_calls", []):
+                name = tc.get("function", {}).get("name")
+                if name:
+                    tool_names.add(name)
+
+    assert tool_names == {"search_web", "fetch_page"}
+
+
+def test_openai_tool_choice_none(sample_tools):
+    response = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "mock-llm",
+            "messages": [{"role": "user", "content": "hello"}],
+            "tools": sample_tools,
+            "tool_choice": "none",
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["choices"][0]["finish_reason"] == "stop"
+    assert "tool_calls" not in data["choices"][0]["message"]
+
+
+def test_openai_streaming_text_content():
+    response = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "mock-llm",
+            "messages": [{"role": "user", "content": "test message"}],
+            "stream": True,
+        },
+    )
+    assert response.status_code == 200
+    lines = [line for line in response.iter_lines()]
+    data_lines = [l for l in lines if l.startswith("data: ") and "[DONE]" not in l]
+    assert len(data_lines) >= 3  # role_header + content chunk(s) + stop
+
+    chunks = [json.loads(l.replace("data: ", "")) for l in data_lines]
+    roles = []
+    contents = []
+    for c in chunks:
+        delta = c["choices"][0]["delta"]
+        if delta.get("role"):
+            roles.append(delta["role"])
+        if delta.get("content"):
+            contents.append(delta["content"])
+    assert "assistant" in roles
+    assert len(contents) > 0
+
+    last_chunk = chunks[-1]
+    assert last_chunk["choices"][0]["finish_reason"] == "stop"
