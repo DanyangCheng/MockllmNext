@@ -1,17 +1,39 @@
 import json
-from unittest.mock import mock_open, patch
+from unittest.mock import mock_open, patch, MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
 
 MOCK_YAML_CONTENT = """
-responses:
-  default: "I don't know the answer to that."
+defaults:
+  unknown_response: "I don't know the answer to that."
+
+patterns:
+  - regex: "weather and time"
+    type: "tool_call"
+
+  - regex: "search and fetch"
+    type: "tool_call"
+
+  - regex: "weather|tool call"
+    type: "tool_call"
+    function:
+      name: "get_weather_info"
+      arguments: '{"location": "test", "days": 42}'
 """
 
+
+def _mock_stat():
+    st = MagicMock()
+    st.st_mtime = 9999999999
+    return st
+
+
 with patch("builtins.open", mock_open(read_data=MOCK_YAML_CONTENT)), patch(
-    "os.path.exists", return_value=True
-), patch("mockllm.config.ResponseConfig.load_responses"):
+    "io.open", mock_open(read_data=MOCK_YAML_CONTENT)
+), patch("os.path.exists", return_value=True), patch(
+    "pathlib.Path.stat", return_value=_mock_stat()
+):
     from mockllm.server import app
 
 client = TestClient(app)
@@ -20,8 +42,10 @@ client = TestClient(app)
 @pytest.fixture(autouse=True)
 def mock_responses_file():
     with patch("builtins.open", mock_open(read_data=MOCK_YAML_CONTENT)), patch(
-        "os.path.exists", return_value=True
-    ), patch("mockllm.config.ResponseConfig.load_responses"):
+        "io.open", mock_open(read_data=MOCK_YAML_CONTENT)
+    ), patch("os.path.exists", return_value=True), patch(
+        "pathlib.Path.stat", return_value=_mock_stat()
+    ):
         yield
 
 

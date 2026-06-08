@@ -269,14 +269,14 @@ class OpenAIProvider(LLMProvider):
 
         # ---- branch: emit tool calls ----
         is_tool_response = last_msg.role == "tool"
+
+        has_tool_permission = request.tool_choice != "none" 
+
         trigger_tool = (
             not is_tool_response
-            and (
-                (matched_pattern and matched_pattern.get("type") == "tool_call")
-                or bool(request.tools and request.tool_choice != "none")
+            and bool(matched_pattern and matched_pattern.get("type") == "tool_call")
+            and bool(request.tools and has_tool_permission)
             )
-        )
-
         if trigger_tool:
             regex_tool_info = (
                 matched_pattern.get("function", {})

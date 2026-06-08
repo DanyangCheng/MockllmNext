@@ -6,14 +6,18 @@ import pytest
 from fastapi.testclient import TestClient
 
 YAML_CONTENT = """
-responses:
-  "exact match prompt": "exact match response"
-  "stream this please": "streaming content for testing"
-
 defaults:
   unknown_response: "default unknown response"
 
 patterns:
+  - regex: "exact match prompt"
+    type: "text"
+    text: "exact match response"
+
+  - regex: "stream this please"
+    type: "text"
+    text: "streaming content for testing"
+
   - regex: "sensitive|secret|password"
     type: "text"
     text: "Blocked for security"
@@ -92,11 +96,11 @@ def configured_client(yaml_file):
 
 
 # ---------------------------------------------------------------------------
-# Exact match / default responses
+# Pattern matching — text type responses
 # ---------------------------------------------------------------------------
 
 
-def test_exact_match_response(configured_client):
+def test_pattern_text_response(configured_client):
     resp = configured_client.post(
         "/v1/chat/completions",
         json={

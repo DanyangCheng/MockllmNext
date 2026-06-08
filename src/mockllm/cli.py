@@ -24,10 +24,6 @@ def validate_responses_file(
             # Validate structure
             if not isinstance(data, dict):
                 raise click.BadParameter("YAML file must contain a dictionary")
-            if "responses" not in data:
-                raise click.BadParameter("YAML file must contain 'responses' key")
-            if not isinstance(data["responses"], dict):
-                raise click.BadParameter("'responses' must be a dictionary")
         return value
     except yaml.YAMLError as e:
         raise click.BadParameter(f"Invalid YAML file: {e}")  # noqa: B904
@@ -76,7 +72,7 @@ def validate(responses_file: str) -> None:
         config = ResponseConfig(responses_file)
         config.load_responses()
         click.echo(click.style("✓ Valid responses file", fg="green"))
-        click.echo(f"Found {len(config.responses)} responses")
+        click.echo(f"Found {len(config.patterns)} regex patterns")
     except Exception as e:
         click.echo(click.style("✗ Invalid responses file", fg="red"))
         click.echo(str(e))

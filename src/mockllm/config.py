@@ -30,7 +30,6 @@ class ResponseConfig:
             str, yaml_path or os.getenv("MOCKLLM_RESPONSES_FILE", "responses.yml")
         )
         self.last_modified = 0
-        self.responses: Dict[str, str] = {}
         self.patterns: list = []
         self.default_response = "I don't know the answer to that."
         self.lag_enabled = False
@@ -45,7 +44,6 @@ class ResponseConfig:
             if current_mtime > self.last_modified:
                 with path.open("r") as f:
                     data = yaml.safe_load(f)
-                    self.responses = data.get("responses", {})
                     self.patterns = data.get("patterns", [])
                     self.default_response = data.get("defaults", {}).get(
                         "unknown_response", self.default_response
@@ -55,7 +53,7 @@ class ResponseConfig:
                     self.lag_factor = settings.get("lag_factor", 10)
                 self.last_modified = int(current_mtime)
                 logger.info(
-                    f"Loaded {len(self.responses)} responses, {len(self.patterns)} regex patterns from {self.yaml_path}"
+                    f"Loaded {len(self.patterns)} regex patterns from {self.yaml_path}"
                 )
         except Exception as e:
             logger.error(f"Error loading responses: {str(e)}")
@@ -109,13 +107,9 @@ class ResponseConfig:
     def get_response(self, prompt: str) -> str:
         """Get response for a given prompt."""
         self.load_responses()  # Check for updates
-        if prompt in self.responses:
-            return self.responses[prompt]
-        
         matched = self.match_pattern(prompt)
         if matched and matched.get("type") == "text":
             return matched.get("text", self.default_response)
-            
         return self.default_response
 
     def get_streaming_response(
