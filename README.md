@@ -21,24 +21,27 @@ This next-generation fork is specifically tailored for deterministic testing, in
 
 ### Response Configuration
 
-Responses are configured in `responses.yml`. The file has four main sections:
+Responses are configured in `responses.yml`. The file has three main sections:
 
-1. `responses`: Maps precise input prompts to predefined responses.
-2. `patterns`: Advanced regular expression matching rules for routing to text guardrails or complex tool calling interactions.
-3. `defaults`: Contains default configurations like the unknown response message.
-4. `settings`: Contains server behavior settings like network lag simulation.
+1. `patterns`: Regular expression matching rules that route user prompts to text responses or tool call simulations. **This is the primary way to define custom responses** — all mocked replies must go through a matching pattern.
+2. `defaults`: Contains the fallback `unknown_response` message returned when no pattern matches.
+3. `settings`: Contains server behavior settings like network lag simulation.
 
 Example `responses.yml`:
 
 ```yaml
-
-responses:
-  "write a python function to calculate factorial": "def factorial(n):\n    if n == 0:\n        return 1\n    return n * factorial(n - 1)"
-  "what colour is the sky?": "The sky is purple except on Tuesday when it is  hue green."
-
-# Advanced Pattern Matching & Tool Calling Engine
+# Regular Expression Pattern Matching & Tool Calling Engine
 patterns:
-  # Route 1: Force a Tool Call & capture dynamic arguments
+  # Route 1: Match a prompt and return a static text response
+  - regex: "what colour is the sky"
+    type: "text"
+    text: "The sky is blue during a clear day due to a phenomenon called Rayleigh scattering."
+
+  - regex: "tell me a joke"
+    type: "text"
+    text: "Why don't programmers like nature? It has too many bugs!"
+
+  # Route 2: Force a Tool Call & capture dynamic arguments
   - regex: "^List the files in (.*)$"
     type: "tool_call"
     function:
@@ -46,7 +49,7 @@ patterns:
       arguments: '{"path": "$1", "recursive": false}'
     final_text: "Successfully invoked list_dir on directory $1, execution result: {{result}}"
 
-  # Route 2: Short-circuit user request with a static text guardrail
+  # Route 3: Short-circuit with a security guardrail
   - regex: "password|key|token"
     type: "text"
     text: "Alert: Sensitive content detected. Mockllm declined to respond due to privacy concerns."
@@ -120,9 +123,7 @@ mockllm validate responses.yml
 
 ## Quick Start
 
-Set up the responses.yml:
-
-```yaml
+Set up the `responses.yml` file (you can use the example above or create your own).
 
 Validate your responses file (optional):
 
